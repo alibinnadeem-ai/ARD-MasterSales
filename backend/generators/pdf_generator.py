@@ -3,13 +3,15 @@
 ARD City Sales Intelligence — Dynamic PDF Generator
 Accepts full plan JSON from stdin, writes PDF to output_path
 """
-import sys, json
+import sys, json, os
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, PageBreak,
     HRFlowable, Table, TableStyle, KeepTogether)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.colors import HexColor, white, black
+from reportlab.lib.utils import ImageReader
+from PIL import Image
 
 data = json.load(sys.stdin)
 fd         = data.get("formData", {})
@@ -22,6 +24,23 @@ goal_status= data.get("goalStatus", {})
 goal_notes = data.get("goalNotes", {})
 summary    = data.get("summary", "")
 out        = data.get("output_path", "/tmp/ard_plan.pdf")
+
+# ── LOAD LOGO ─────────────────────────────────────────────────────────────
+script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+logo_path = os.path.join(script_dir, "public", "LogoDark.png")
+logo_img = None
+logo_width, logo_height = 0, 0
+try:
+    if os.path.exists(logo_path):
+        pil_img = Image.open(logo_path)
+        logo_width, logo_height = pil_img.size
+        # Resize for header (smaller)
+        logo_img_header = ImageReader(logo_path)
+        # Resize for cover (larger)
+        logo_img_cover = ImageReader(logo_path)
+        logo_img = True
+except Exception as e:
+    print(f"Warning: Logo not found at {logo_path}: {e}", file=sys.stderr)
 
 # ── HELPERS ─────────────────────────────────────────────────────────────────
 def hx(c): return HexColor(c if c.startswith("#") else "#"+c)
@@ -164,12 +183,23 @@ plan_period = get_meta_val("Period") or ""
 # ── BUILD STORY ──────────────────────────────────────────────────────────────
 story = []
 
-# COVER
-story += [Spacer(1,0.6*inch), Paragraph(dev_name.upper(), COVER_T),
-          Paragraph(safe(plan_title), COVER_S),
-          Paragraph("SALES PLAN  ·  KPI FRAMEWORK  ·  SMART GOALS  ·  JOB DESCRIPTIONS",
-            ps("CSUB",fontSize=9,textColor=SLATE,fontName="Helvetica",alignment=1,characterSpacing=80)),
-          gold_hr()]
+# COVER - Use logo instead of "ARD CITY" text
+from reportlab.platypus import Image
+if logo_img:
+    # Calculate aspect ratio for cover logo (approx 2.5 inches wide)
+    cover_logo_width = 2.5 * inch
+    cover_logo_height = (logo_height / logo_width) * cover_logo_width
+    story += [Spacer(1,0.4*inch), Image(logo_path, width=cover_logo_width, height=cover_logo_height, hAlign="CENTER"),
+              Paragraph(safe(plan_title), COVER_S),
+              Paragraph("SALES PLAN  ·  KPI FRAMEWORK  ·  SMART GOALS  ·  JOB DESCRIPTIONS",
+                ps("CSUB",fontSize=9,textColor=SLATE,fontName="Helvetica",alignment=1,characterSpacing=80)),
+              gold_hr()]
+else:
+    story += [Spacer(1,0.6*inch), Paragraph(dev_name.upper(), COVER_T),
+              Paragraph(safe(plan_title), COVER_S),
+              Paragraph("SALES PLAN  ·  KPI FRAMEWORK  ·  SMART GOALS  ·  JOB DESCRIPTIONS",
+                ps("CSUB",fontSize=9,textColor=SLATE,fontName="Helvetica",alignment=1,characterSpacing=80)),
+              gold_hr()]
 for label, val in [("Development",dev_name),("Prepared By",prepared_by),("Date",plan_date),
                    ("Revenue Target",rev_target),("Inventory",inventory),
                    ("Launch Date",launch_date),("Plan Period",plan_period)]:
@@ -265,7 +295,14 @@ def on_first(canvas, doc):
     canvas.setFillColor(NAVY); canvas.rect(0,letter[1]-0.22*inch,letter[0],0.22*inch,fill=1,stroke=0)
     canvas.setFillColor(white); canvas.setFont("Helvetica",7)
     canvas.drawString(0.5*inch,0.15*inch,"CONFIDENTIAL")
-    canvas.drawRightString(letter[0]-0.5*inch,0.15*inch,f"{dev_name.upper()}  ·  SALES INTELLIGENCE PACKAGE")
+    # Use logo in footer instead of "ARD CITY" text
+    if logo_img:
+        footer_logo_width = 0.8 * inch
+        footer_logo_height = (logo_height / logo_width) * footer_logo_width
+        canvas.drawImage(logo_path, letter[0]-0.5*inch-footer_logo_width, 0.12*inch,
+                      width=footer_logo_width, height=footer_logo_height, mask='auto')
+    else:
+        canvas.drawRightString(letter[0]-0.5*inch,0.15*inch,f"{dev_name.upper()}  ·  SALES INTELLIGENCE PACKAGE")
     canvas.restoreState()
 
 def on_later(canvas, doc):
@@ -273,12 +310,19 @@ def on_later(canvas, doc):
     canvas.setStrokeColor(GOLD); canvas.setLineWidth(1)
     canvas.line(0.6*inch,0.62*inch,letter[0]-0.6*inch,0.62*inch)
     canvas.setFont("Helvetica",7); canvas.setFillColor(SLATE)
-    canvas.drawString(0.6*inch,0.42*inch,f"{safe(dev_name)}  ·  {safe(plan_title)}  ·  CONFIDENTIAL")
+    canvas.drawString(0.6*inch,0.42*inch,f"{safe(plan_title)}  ·  CONFIDENTIAL")
     canvas.drawRightString(letter[0]-0.6*inch,0.42*inch,f"Page {doc.page}")
     canvas.setStrokeColor(GOLD); canvas.setLineWidth(0.5)
     canvas.line(0.6*inch,letter[1]-0.47*inch,letter[0]-0.6*inch,letter[1]-0.47*inch)
-    canvas.setFont("Helvetica-Bold",7); canvas.setFillColor(NAVY)
-    canvas.drawString(0.6*inch,letter[1]-0.36*inch,dev_name.upper())
+    # Use logo in header instead of "ARD CITY" text
+    if logo_img:
+        header_logo_width = 1.2 * inch
+        header_logo_height = (logo_height / logo_width) * header_logo_width
+        canvas.drawImage(logo_path, 0.6*inch, letter[1]-0.42*inch-header_logo_height,
+                      width=header_logo_width, height=header_logo_height, mask='auto')
+    else:
+        canvas.setFont("Helvetica-Bold",7); canvas.setFillColor(NAVY)
+        canvas.drawString(0.6*inch,letter[1]-0.36*inch,dev_name.upper())
     canvas.setFont("Helvetica",7); canvas.setFillColor(SLATE)
     canvas.drawRightString(letter[0]-0.6*inch,letter[1]-0.36*inch,safe(prepared_by))
     canvas.restoreState()
