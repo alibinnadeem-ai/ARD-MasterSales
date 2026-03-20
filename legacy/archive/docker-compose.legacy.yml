@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ardcity-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+    volumes:
+      - ./frontend/dist:/app/public:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ardcity-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ardcity-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - ardcity-net
+    profiles:
+      - production
+
+networks:
+  ardcity-net:
+    driver: bridge
